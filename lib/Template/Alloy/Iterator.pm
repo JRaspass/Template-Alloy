@@ -11,6 +11,7 @@ use warnings;
 
 sub new {
     my ($class, $items) = @_;
+    return $items if ref($items) =~ /Iterator$/;
     $items = [] if ! defined $items;
     if (ref($items) eq 'HASH') {
 	$items = [ map { {key => $_, value => $items->{ $_ }} } sort keys %$items ];

@@ -224,6 +224,13 @@ ${indent}}";
 
 sub compile_expr {
     my ($self, $var, $indent) = @_;
+
+    # Inline simple expressions into lookups into _var.
+    return "\$self->{'_vars'}{'$var->[0]'}"
+        if @$var == 2
+        && $var->[0] =~ /^[a-z]+$/
+        && !$self->{'LOWER_CASE_VAR_FALLBACK'};
+
     return "\$self->play_expr(".$self->ast_string($var).")";
 }
 
@@ -379,11 +386,19 @@ sub compile_FOR {
     local $self->{'_in_loop'} = 'FOREACH';
     my $code = $self->compile_tree($node->[4], "$indent$INDENT");
 
-    $$str_ref .= "\n${indent}do {
+    if ($self->{NG}) {
+        $$str_ref .= "\n${indent}do {
+${indent}my \$loop = \$self->iterator(".$self->compile_expr($items, $indent).");
+${indent}local \$self->{'_vars'}->{'loop'} = \$loop;";
+    }
+    else {
+        $$str_ref .= "\n${indent}do {
 ${indent}my \$loop = ".$self->compile_expr($items, $indent).";
 ${indent}\$loop = [] if ! defined \$loop;
 ${indent}\$loop = \$self->iterator(\$loop) if ref(\$loop) !~ /Iterator\$/;
 ${indent}local \$self->{'_vars'}->{'loop'} = \$loop;";
+    }
+
     if (! defined $name) {
         $$str_ref .= "
 ${indent}my \$swap = \$self->{'_vars'};
@@ -411,6 +426,27 @@ sub compile_FOREACH { shift->compile_FOR(@_) }
 
 sub compile_IF {
     my ($self, $node, $str_ref, $indent) = @_;
+
+    # "[% IF foo %]bar[% END %]" => "$out .= bar if foo".
+    if ($self->{NG} && @$node == 5 && !ref $node->[4][0] && ref $node->[4][1] && $node->[4][1][0] eq 'END') {
+        $$str_ref .= "\n$indent".$self->compile_tree([$node->[4][0]], $indent);
+        $$str_ref =~ s/;$//;
+        $$str_ref .= ' if '.$self->compile_expr($node->[3], $indent).";";
+        $$str_ref .= "\n$indent".$self->compile_tree([$node->[4][1]], $indent);
+        return;
+    }
+
+    # "[% IF foo %]bar[% ELSE %]baz[% END %]" => "$out .= foo ? bar : baz".
+    if ($self->{NG} && @$node == 6 && !ref $node->[4][0] && $node->[5][0] eq 'ELSE' && !ref $node->[5][4][0] && $node->[5][4][1][0] eq 'END') {
+        my $if = $node->[4][0]; # must make a copy before modification
+        $if =~ s/([\'\\])/\\$1/g;
+
+        my $else = $node->[5][4][0]; # must make a copy before modification
+        $else =~ s/([\'\\])/\\$1/g;
+
+        $$str_ref .= "\n$indent\$\$out_ref .= ".$self->compile_expr($node->[3], $indent)." ? '$if' : '$else';";
+        return;
+    }
 
     $$str_ref .= "\n${indent}if (".$self->compile_expr($node->[3], $indent).") {";
     $$str_ref .= $self->compile_tree($node->[4], "$indent$INDENT");
