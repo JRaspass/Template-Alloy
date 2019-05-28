@@ -62,6 +62,8 @@ our $DIRECTIVES = {
     WRAPPER => \&compile_WRAPPER,
 };
 
+use constant defined_or => ($^V >= 5.009) || 0; # perl 5.10 allows //
+
 sub new { die "This class is a role for use by packages such as Template::Alloy" }
 
 sub load_perl {
@@ -318,9 +320,16 @@ sub compile_DUMP {
 
 sub compile_GET {
     my ($self, $node, $str_ref, $indent) = @_;
-    $$str_ref .= "
+
+    if (defined_or) {
+        $$str_ref .= "
+$indent\$\$out_ref .= ".$self->compile_expr($node->[3], $indent)." // \$self->undefined_get(".$self->ast_string($node->[3]).");";
+    } else {
+        $$str_ref .= "
 $indent\$var = ".$self->compile_expr($node->[3], $indent).";
 $indent\$\$out_ref .= defined(\$var) ? \$var : \$self->undefined_get(".$self->ast_string($node->[3]).");";
+    }
+
     return;
 }
 
